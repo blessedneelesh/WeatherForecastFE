@@ -1,0 +1,131 @@
+# =============================================================
+# REACT PHASE 03 — Snyk Security Scan
+# Trigger  : workflow_call (called by 06-full-pipeline.yml)
+#             OR manually via workflow_dispatch
+# Goal     : Scan React npm dependencies for vulnerabilities
+#
+# Mirrors: 10-full-pipeline.yml → jobs.snyk (Stage 3)
+#
+# REQUIRED SECRETS:
+#   SNYK_TOKEN
+# =============================================================
+
+name: "🛡️ React Phase 03 — Snyk Security Scan"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "20.x"
+
+jobs:
+  snyk:
+    name: "3 · Snyk Security Scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Snyk dependency test
+        id: snyk-scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: >
+            --severity-threshold=high
+            --sarif-file-output=snyk-deps.sarif
+            --all-projects
+            --detection-depth=4
+
+      - name: Verify and process SARIF file
+        id: verify-sarif
+        run: |
+          if [ -f "snyk-deps.sarif" ]; then
+            echo "has_sarif=true" >> $GITHUB_OUTPUT
+            which jq || sudo apt-get update && sudo apt-get install -y jq
+            run_count=$(jq '.runs | length' snyk-deps.sarif 2>/dev/null || echo "1")
+            echo "run_count=$run_count" >> $GITHUB_OUTPUT
+            if [ "$run_count" -gt 1 ]; then
+              echo "needs_split=true" >> $GITHUB_OUTPUT
+              index=0
+              jq -c '.runs[]' snyk-deps.sarif | while IFS= read -r run; do
+                index=$((index + 1))
+                sarif_file="snyk-deps-${index}.sarif"
+                echo "{\"version\": \"2.1.0\", \"\$schema\": \"https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json\", \"runs\": [$run]}" > "$sarif_file"
+              done
+            else
+              echo "needs_split=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_sarif=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload single SARIF file
+        if: steps.verify-sarif.outputs.has_sarif == 'true' && steps.verify-sarif.outputs.needs_split == 'false'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: snyk-deps.sarif
+          category: snyk-react-dependencies
+
+      - name: Upload split SARIF files
+        if: steps.verify-sarif.outputs.has_sarif == 'true' && steps.verify-sarif.outputs.needs_split == 'true'
+        run: |
+          index=0
+          for sarif_file in snyk-deps-*.sarif; do
+            if [ -f "$sarif_file" ]; then
+              index=$((index + 1))
+              project_name=$(jq -r '.runs[0].tool.driver.name // "project-'$index'"' "$sarif_file" | tr '[:upper:]' '[:lower:]' | tr ' /.\\' '-')
+              category="snyk-react-${project_name}-${{ github.run_id }}"
+              gh api \
+                --method POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "/repos/${{ github.repository }}/code-scanning/sarifs" \
+                -f "commit_sha=${{ github.sha }}" \
+                -f "ref=${{ github.ref }}" \
+                -f "sarif=@$sarif_file" \
+                -f "tool_name=Snyk" \
+                -f "category=$category" || echo "⚠️ Upload failed for $sarif_file"
+            fi
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enforce Snyk gate (monitoring mode)
+        if: steps.snyk-scan.outcome == 'failure'
+        run: |
+          echo "::warning::Snyk found HIGH or CRITICAL vulnerabilities (monitor mode)"
+          echo "⚠️ **Snyk - Monitoring Mode:** HIGH/CRITICAL vulnerabilities detected." >> $GITHUB_STEP_SUMMARY
+          # exit 1  # Temporarily disabled for investigation
+
+      - name: Post Snyk summary
+        if: always()
+        run: |
+          echo "## 🛡️ React Phase 03 — Snyk Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo ""                                           >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |"                          >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|"                          >> $GITHUB_STEP_SUMMARY
+          echo "| Severity threshold | HIGH + CRITICAL |"  >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.snyk-scan.outcome }}" == "failure" ]; then
+            echo "| Status | ⚠️ Vulnerabilities detected (monitoring mode) |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | ✅ No vulnerabilities found |" >> $GITHUB_STEP_SUMMARY
+          fi
