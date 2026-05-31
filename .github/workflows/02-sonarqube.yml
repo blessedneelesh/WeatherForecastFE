@@ -1,0 +1,84 @@
+# =============================================================
+# REACT PHASE 02 — SonarQube Analysis
+# Trigger  : workflow_call (called by 06-full-pipeline.yml)
+#             OR manually via workflow_dispatch
+# Goal     : Run SonarQube analysis on React source code
+#
+# Mirrors: 10-full-pipeline.yml → jobs.sonarqube (Stage 2)
+#
+# REQUIRED SECRETS:
+#   SONAR_TOKEN_REACT, SONAR_HOST_URL
+#
+# REQUIRED VARIABLES:
+#   SONAR_PROJECT_KEY, SONAR_ORGANIZATION
+# =============================================================
+
+name: "🔍 React Phase 02 — SonarQube Analysis"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "20.x"
+
+jobs:
+  sonarqube:
+    name: "2 · SonarQube Analysis"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout (full history for blame)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run tests with lcov coverage for SonarQube
+      - name: Run tests with coverage (lcov)
+        run: |
+          npm test -- \
+            --coverage \
+            --coverageReporters=lcov \
+            --watchAll=false \
+            --ci
+        env:
+          CI: true
+
+      # SonarQube scan — uses sonar-project.properties or inline config
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN_REACT }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY_REACT }}
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.sources=src
+            -Dsonar.tests=src
+            -Dsonar.test.inclusions=**/*.test.tsx,**/*.test.ts,**/*.test.js,**/*.spec.tsx,**/*.spec.ts
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.exclusions=**/node_modules/**,**/build/**,**/coverage/**,**/*.test.*,**/*.spec.*
+            -Dsonar.coverage.exclusions=**/*.test.*,**/*.spec.*,src/index.tsx,src/reportWebVitals.ts
+            -Dsonar.qualitygate.wait=false
+
+      - name: Post SonarQube summary
+        if: always()
+        run: |
+          echo "## 🔍 React Phase 02 — SonarQube Analysis"                                          >> $GITHUB_STEP_SUMMARY
+          echo ""                                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |"                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|"                                                                     >> $GITHUB_STEP_SUMMARY
+          echo "| Project   | \`${{ vars.SONAR_PROJECT_KEY_REACT }}\` |"                             >> $GITHUB_STEP_SUMMARY
+          echo "| Branch    | \`${{ github.ref_name }}\` |"                                          >> $GITHUB_STEP_SUMMARY
+          echo "| Dashboard | [Open SonarQube](${{ secrets.SONAR_HOST_URL }}/dashboard?id=${{ vars.SONAR_PROJECT_KEY_REACT }}) |" >> $GITHUB_STEP_SUMMARY
