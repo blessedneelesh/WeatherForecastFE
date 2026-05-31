@@ -1,0 +1,172 @@
+# =============================================================
+# REACT PHASE 06 — Full CI + CD Pipeline
+# Trigger  : push → master OR feature/**
+# Goal     : Complete pipeline: Test → Quality → Build → Deploy
+#
+# Wires together:
+#   01-test.yml     → Stage 1 (Jest + coverage)
+#   02-sonarqube.yml → Stage 2 (SonarQube)
+#   03-snyk.yml     → Stage 3 (Snyk)
+#   04-build.yml    → Stage 4 (npm run build)
+#   05-deploy.yml   → Stage 5/6/7 (Azure Static Web Apps)
+#
+# Stage sequence:
+#   1  · Unit Tests + Coverage
+#   2  · SonarQube Quality Gate  ─┐ parallel after tests
+#   3  · Snyk Security Scan      ─┘
+#   4a · Build (dev)               ← feature/** branches only
+#   4b · Build (staging)           ← master only
+#   5a · Deploy → SWA dev          ← feature/** branches only
+#   5b · Deploy → SWA staging      ← master only
+#   6  · Deploy → SWA production   ← staging-and-production + manual approval
+#
+# Mirrors: 10-full-pipeline.yml structure exactly
+#
+# REQUIRED SECRETS:
+#   SONAR_TOKEN, SONAR_HOST_URL
+#   SNYK_TOKEN
+#   AZURE_STATIC_WEB_APPS_TOKEN_DEV
+#   AZURE_STATIC_WEB_APPS_TOKEN_STAGING
+#   AZURE_STATIC_WEB_APPS_TOKEN_PRODUCTION
+#
+# REQUIRED VARIABLES:
+#   SONAR_PROJECT_KEY_REACT, SONAR_ORGANIZATION
+#   REACT_APP_API_URL_DEV
+#   REACT_APP_API_URL_STAGING
+#   REACT_APP_API_URL_PRODUCTION
+#   REACT_APP_URL_DEV
+#   REACT_APP_URL_STAGING
+#   REACT_APP_URL_PRODUCTION
+# =============================================================
+
+name: "🚀 React Phase 06 — Full CI + CD Pipeline"
+
+on:
+  push:
+    branches:
+      - master
+      - "feature/**"
+  workflow_dispatch:
+    inputs:
+      deploy-target:
+        description: "Deployment target"
+        type: choice
+        options: [staging-only, staging-and-production]
+        default: staging-only
+      skip-sonar:
+        description: "Skip SonarQube (hotfix only)"
+        type: boolean
+        default: false
+      skip-snyk:
+        description: "Skip Snyk (hotfix only)"
+        type: boolean
+        default: false
+
+# ════════════════════════════════════════════════════════════
+# STAGE 1 — Unit Tests & Coverage
+# ════════════════════════════════════════════════════════════
+jobs:
+  test:
+    name: "1 · Unit Tests & Coverage"
+    uses: ./.github/workflows/01-test.yml
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 2 — SonarQube (parallel with Snyk)
+  # ════════════════════════════════════════════════════════════
+  sonarqube:
+    name: "2 · SonarQube Analysis"
+    needs: test
+    if: ${{ !inputs.skip-sonar }}
+    uses: ./.github/workflows/02-sonarqube.yml
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 3 — Snyk (parallel with SonarQube)
+  # ════════════════════════════════════════════════════════════
+  snyk:
+    name: "3 · Snyk Security Scan"
+    needs: test
+    if: ${{ !inputs.skip-snyk }}
+    uses: ./.github/workflows/03-snyk.yml
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 4a — Build (dev) — feature branches only
+  # ════════════════════════════════════════════════════════════
+  build-dev:
+    name: "4a · Build (dev)"
+    needs: [sonarqube, snyk]
+    if: ${{ github.ref != 'refs/heads/master' }}
+    uses: ./.github/workflows/04-build.yml
+    with:
+      environment: dev
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 4b — Build (staging) — master only
+  # ════════════════════════════════════════════════════════════
+  build-staging:
+    name: "4b · Build (staging)"
+    needs: [sonarqube, snyk]
+    if: ${{ github.ref == 'refs/heads/master' }}
+    uses: ./.github/workflows/04-build.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 5a — Deploy → SWA dev — feature branches only
+  # ════════════════════════════════════════════════════════════
+  deploy-dev:
+    name: "5a · Deploy → SWA dev"
+    needs: [build-dev]
+    if: ${{ github.ref != 'refs/heads/master' }}
+    uses: ./.github/workflows/05-deploy.yml
+    with:
+      environment: dev
+      build-artifact: ${{ needs.build-dev.outputs.build-artifact }}
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 5b — Deploy → SWA staging — master only
+  # ════════════════════════════════════════════════════════════
+  deploy-staging:
+    name: "5b · Deploy → SWA staging"
+    needs: [build-staging]
+    if: ${{ github.ref == 'refs/heads/master' }}
+    uses: ./.github/workflows/05-deploy.yml
+    with:
+      environment: staging
+      build-artifact: ${{ needs.build-staging.outputs.build-artifact }}
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 6 — Build (production)
+  # needs: deploy-staging — production only built after staging healthy
+  # Only triggered: staging-and-production manual dispatch
+  # ════════════════════════════════════════════════════════════
+  build-production:
+    name: "6 · Build (production)"
+    needs: [deploy-staging]
+    if: ${{ inputs.deploy-target == 'staging-and-production' }}
+    uses: ./.github/workflows/04-build.yml
+    with:
+      environment: production
+    secrets: inherit
+
+  # ════════════════════════════════════════════════════════════
+  # STAGE 7 — Deploy → SWA production
+  # needs: build-production — deploy after production build
+  # Requires GitHub Environment protection (manual approval)
+  # Only triggered: staging-and-production manual dispatch
+  # ════════════════════════════════════════════════════════════
+  deploy-production:
+    name: "7 · Deploy → SWA production (manual approval)"
+    needs: [build-production]
+    if: ${{ inputs.deploy-target == 'staging-and-production' }}
+    uses: ./.github/workflows/05-deploy.yml
+    with:
+      environment: production
+      build-artifact: ${{ needs.build-production.outputs.build-artifact }}
+    secrets: inherit
