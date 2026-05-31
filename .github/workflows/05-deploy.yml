@@ -3,19 +3,17 @@
 # Trigger  : workflow_call (called by 06-full-pipeline.yml)
 #             OR manually via workflow_dispatch
 # Goal     : Deploy build artifact to Azure Static Web Apps
-#            for dev, staging, or production environment
+#            for staging or production environment
 #
 # Mirrors: 07-deploy-app-service.yml (Phase 7 of .NET pipeline)
 # Key difference: No Docker, no slots — SWA handles environments
 #                 natively via deployment environments
 #
 # REQUIRED SECRETS:
-#   AZURE_STATIC_WEB_APPS_TOKEN_DEV        → SWA deployment token (dev)
 #   AZURE_STATIC_WEB_APPS_TOKEN_STAGING    → SWA deployment token (staging)
 #   AZURE_STATIC_WEB_APPS_TOKEN_PRODUCTION → SWA deployment token (production)
 #
 # REQUIRED VARIABLES:
-#   REACT_APP_URL_DEV        → https://dev.yourapp.com
 #   REACT_APP_URL_STAGING    → https://staging.yourapp.com
 #   REACT_APP_URL_PRODUCTION → https://yourapp.com
 # =============================================================
@@ -26,7 +24,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: "Target environment: dev | staging | production"
+        description: "Target environment: staging | production"
         type: string
         required: true
         default: staging
@@ -38,7 +36,6 @@ on:
       deploy-url:
         value: ${{ jobs.deploy.outputs.url }}
     secrets:
-      AZURE_STATIC_WEB_APPS_TOKEN_DEV:        { required: false }
       AZURE_STATIC_WEB_APPS_TOKEN_STAGING:    { required: false }
       AZURE_STATIC_WEB_APPS_TOKEN_PRODUCTION: { required: false }
 
@@ -46,7 +43,7 @@ on:
     inputs:
       environment:
         type: choice
-        options: [dev, staging, production]
+        options: [staging, production]
         default: staging
       build-artifact:
         description: "Build artifact name (from Phase 04)"
@@ -72,12 +69,9 @@ jobs:
           if [ "${{ inputs.environment }}" = "production" ]; then
             echo "swa_token=${{ secrets.AZURE_STATIC_WEB_APPS_TOKEN_PRODUCTION }}" >> $GITHUB_OUTPUT
             echo "app_url=${{ vars.REACT_APP_URL_PRODUCTION }}"                    >> $GITHUB_OUTPUT
-          elif [ "${{ inputs.environment }}" = "staging" ]; then
+          else
             echo "swa_token=${{ secrets.AZURE_STATIC_WEB_APPS_TOKEN_STAGING }}"   >> $GITHUB_OUTPUT
             echo "app_url=${{ vars.REACT_APP_URL_STAGING }}"                      >> $GITHUB_OUTPUT
-          else
-            echo "swa_token=${{ secrets.AZURE_STATIC_WEB_APPS_TOKEN_DEV }}"       >> $GITHUB_OUTPUT
-            echo "app_url=${{ vars.REACT_APP_URL_DEV }}"                          >> $GITHUB_OUTPUT
           fi
 
       # ── Download build artifact from Phase 04 ─────────────────
@@ -85,7 +79,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.build-artifact }}
-          path: build/
+          path: dist/
 
       # ── Deploy to Azure Static Web Apps ───────────────────────
       - name: Deploy to Azure Static Web Apps (${{ inputs.environment }})
@@ -95,7 +89,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ steps.resolve-config.outputs.swa_token }}
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           action: upload
-          app_location: build/
+          app_location: dist/
           skip_app_build: true    # already built in Phase 04
 
       # ── Smoke test deployed app ────────────────────────────────
