@@ -13,7 +13,7 @@ const getErrorMessage = (e: unknown): string => {
   return 'Unexpected error';
 };
 
-function* fetchAll(): Generator {
+export function* fetchAll(): Generator {
   try {
     const items = (yield call(svc.getAll)) as WeatherForecastDTO[];
     yield put(A.fetchAllSuccess(items));
@@ -22,7 +22,7 @@ function* fetchAll(): Generator {
   }
 }
 
-function* fetchById(action: ReturnType<typeof A.fetchByIdRequest>): Generator {
+export function* fetchById(action: ReturnType<typeof A.fetchByIdRequest>): Generator {
   try {
     const item = (yield call(svc.getById, action.payload)) as WeatherForecastDTO;
     yield put(A.fetchByIdSuccess(item));
@@ -31,7 +31,7 @@ function* fetchById(action: ReturnType<typeof A.fetchByIdRequest>): Generator {
   }
 }
 
-function* createForecast(action: ReturnType<typeof A.createRequest>): Generator {
+export function* createForecast(action: ReturnType<typeof A.createRequest>): Generator {
   try {
     const item = (yield call(svc.create, action.payload)) as WeatherForecastDTO;
     yield put(A.createSuccess(item));
@@ -40,7 +40,7 @@ function* createForecast(action: ReturnType<typeof A.createRequest>): Generator 
   }
 }
 
-function* updateForecast(action: ReturnType<typeof A.updateRequest>): Generator {
+export function* updateForecast(action: ReturnType<typeof A.updateRequest>): Generator {
   try {
     const { id, ...rest } = action.payload;
     const item = (yield call(svc.update, id, { id, ...rest })) as WeatherForecastDTO;
@@ -50,7 +50,7 @@ function* updateForecast(action: ReturnType<typeof A.updateRequest>): Generator 
   }
 }
 
-function* deleteForecast(action: ReturnType<typeof A.deleteRequest>): Generator {
+export function* deleteForecast(action: ReturnType<typeof A.deleteRequest>): Generator {
   try {
     yield call(svc.remove, action.payload);
     yield put(A.deleteSuccess(action.payload));

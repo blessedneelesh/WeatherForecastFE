@@ -1,0 +1,31 @@
+/** @type {import('jest').Config} */
+module.exports = {
+  preset: 'ts-jest',
+  testEnvironment: 'jsdom',
+  roots: ['<rootDir>/src'],
+  setupFiles: ['<rootDir>/jest-setup.cjs'],
+  setupFilesAfterEnv: ['<rootDir>/setupTests.ts'],
+  moduleNameMapper: {
+    '^config/env$': '<rootDir>/src/config/__mocks__/env.ts',
+    '^.+/config/env$': '<rootDir>/src/config/__mocks__/env.ts',
+    '^components/(.*)$': '<rootDir>/src/components/$1',
+    '^redux/(.*)$': '<rootDir>/src/redux/$1',
+    '^services/(.*)$': '<rootDir>/src/services/$1',
+    '^shared/(.*)$': '<rootDir>/src/shared/$1',
+    '^config/(.*)$': '<rootDir>/src/config/$1',
+    '^src/(.*)$': '<rootDir>/src/$1',
+    '^__mocks__/(.*)$': '<rootDir>/src/__mocks__/$1',
+    '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
+  },
+  clearMocks: true,
+  resetMocks: true,
+  testMatch: ['<rootDir>/src/**/__tests__/**/*.test.{ts,tsx,js,jsx}'],
+  coverageReporters: ['lcov', 'json-summary', 'text'],
+  collectCoverageFrom: [
+    'src/**/*.{ts,tsx,js,jsx}',
+    '!src/**/*.d.ts',
+    '!src/main.tsx',
+    '!src/__mocks__/**',
+    '!src/**/__mocks__/**',
+  ],
+};

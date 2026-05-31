@@ -1,0 +1,125 @@
+# =============================================================
+# REACT PHASE 01 — Unit Tests & Coverage
+# Trigger  : workflow_call (called by 06-full-pipeline.yml)
+#             OR manually via workflow_dispatch
+# Goal     : Run Jest + React Testing Library tests with coverage
+#
+# Mirrors: 10-full-pipeline.yml → jobs.test (Stage 1)
+#
+# REQUIRED VARIABLES:
+#   COVERAGE_THRESHOLD → minimum line coverage % (default 0)
+# =============================================================
+
+name: "🧪 React Phase 01 — Unit Tests & Coverage"
+
+on:
+  workflow_call:
+    outputs:
+      coverage-passed:
+        value: ${{ jobs.test.outputs.coverage-passed }}
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: "20.x"
+  COVERAGE_THRESHOLD: "0"
+
+jobs:
+  test:
+    name: "1 · Unit Tests & Coverage"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      coverage-passed: ${{ steps.coverage-gate.outputs.passed }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Run Jest with coverage — outputs lcov + json-summary
+      - name: Run tests with coverage
+        run: |
+          npm test -- \
+            --coverage \
+            --coverageReporters=lcov \
+            --coverageReporters=json-summary \
+            --coverageReporters=text \
+            --watchAll=false \
+            --ci \
+            --reporters=default \
+            --reporters=jest-junit
+        env:
+          CI: true
+          JEST_JUNIT_OUTPUT_DIR: ./test-results
+          JEST_JUNIT_OUTPUT_NAME: test-results.xml
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 30
+
+      - name: Upload test results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+          retention-days: 14
+
+      # Enforce coverage threshold
+      - name: Enforce coverage threshold
+        id: coverage-gate
+        run: |
+          THRESHOLD=${{ env.COVERAGE_THRESHOLD }}
+          if [ -f "coverage/coverage-summary.json" ]; then
+            LINE_PCT=$(python3 -c "
+          import json
+          with open('coverage/coverage-summary.json') as f:
+              data = json.load(f)
+          print(f\"{data['total']['lines']['pct']:.1f}\")
+          ")
+            echo "Line coverage: ${LINE_PCT}%"
+            if (( $(echo "$LINE_PCT < $THRESHOLD" | bc -l) )); then
+              echo "::error::Coverage ${LINE_PCT}% is below required ${THRESHOLD}%"
+              echo "passed=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+            echo "✅ Coverage ${LINE_PCT}% meets ${THRESHOLD}% threshold."
+            echo "passed=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ No coverage summary found — skipping gate"
+            echo "passed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post test summary
+        if: always()
+        run: |
+          echo "## 🧪 React Phase 01 — Unit Tests & Coverage" >> $GITHUB_STEP_SUMMARY
+          echo "_$(date +'%Y-%m-%d %H:%M UTC')_"             >> $GITHUB_STEP_SUMMARY
+          echo ""                                             >> $GITHUB_STEP_SUMMARY
+          if [ -f "coverage/coverage-summary.json" ]; then
+            python3 - << 'EOF'
+          import json
+          with open("coverage/coverage-summary.json") as f:
+              d = json.load(f)["total"]
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/stdout"), "a") as s:
+              s.write("| Metric | Coverage |\n")
+              s.write("|--------|----------|\n")
+              s.write(f"| Lines      | {d['lines']['pct']}% |\n")
+              s.write(f"| Statements | {d['statements']['pct']}% |\n")
+              s.write(f"| Functions  | {d['functions']['pct']}% |\n")
+              s.write(f"| Branches   | {d['branches']['pct']}% |\n")
+          EOF
+          fi
