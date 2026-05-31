@@ -17,8 +17,18 @@
     "noFallthroughCasesInSwitch": true,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "jest", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "components/*": ["src/components/*"],
+      "redux/*": ["src/redux/*"],
+      "services/*": ["src/services/*"],
+      "shared/*": ["src/shared/*"],
+      "config/*": ["src/config/*"],
+      "src/*": ["src/*"],
+      "__mocks__/*": ["src/__mocks__/*"]
+    }
   },
-  "include": ["src"],
+  "include": ["src", "setupTests.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
