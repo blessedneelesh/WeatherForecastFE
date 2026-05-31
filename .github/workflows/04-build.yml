@@ -8,7 +8,6 @@
 # Key difference: No Docker, no ACR — just static files
 #
 # REQUIRED VARIABLES:
-#   REACT_APP_API_URL_DEV        → dev API base URL
 #   REACT_APP_API_URL_STAGING    → staging API base URL
 #   REACT_APP_API_URL_PRODUCTION → production API base URL
 # =============================================================
@@ -19,7 +18,7 @@ on:
   workflow_call:
     inputs:
       environment:
-        description: "Target environment: dev | staging | production"
+        description: "Target environment: staging | production"
         type: string
         required: false
         default: staging
@@ -31,7 +30,7 @@ on:
     inputs:
       environment:
         type: choice
-        options: [dev, staging, production]
+        options: [staging, production]
         default: staging
 
 env:
@@ -64,18 +63,15 @@ jobs:
         run: |
           if [ "${{ inputs.environment }}" = "production" ]; then
             echo "api_url=${{ vars.REACT_APP_API_URL_PRODUCTION }}" >> $GITHUB_OUTPUT
-          elif [ "${{ inputs.environment }}" = "staging" ]; then
-            echo "api_url=${{ vars.REACT_APP_API_URL_STAGING }}"    >> $GITHUB_OUTPUT
           else
-            echo "api_url=${{ vars.REACT_APP_API_URL_DEV }}"        >> $GITHUB_OUTPUT
+            echo "api_url=${{ vars.REACT_APP_API_URL_STAGING }}"    >> $GITHUB_OUTPUT
           fi
 
       # Build with environment-specific API URL baked in
       - name: Build React app (${{ inputs.environment }})
         run: npm run build
         env:
-          CI: false    # allows warnings without failing
-          REACT_APP_API_URL: ${{ steps.config.outputs.api_url }}
+          REACT_APP_WEATHER_API_BASE_URL: ${{ steps.config.outputs.api_url }}
           REACT_APP_ENVIRONMENT: ${{ inputs.environment }}
           REACT_APP_VERSION: ${{ github.sha }}
 
@@ -90,7 +86,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.artifact.outputs.name }}
-          path: build/
+          path: dist/
           retention-days: 7
 
       - name: Post build summary
@@ -104,12 +100,10 @@ jobs:
           echo "| API URL     | \`${{ steps.config.outputs.api_url }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| Commit      | \`${{ github.sha }}\` |"    >> $GITHUB_STEP_SUMMARY
           echo "| Artifact    | \`${{ steps.artifact.outputs.name }}\` |" >> $GITHUB_STEP_SUMMARY
-          # Build size summary
-          if [ -d "build" ]; then
-            SIZE=$(du -sh build/ | cut -f1)
-            JS_SIZE=$(du -sh build/static/js/ 2>/dev/null | cut -f1 || echo "n/a")
-            CSS_SIZE=$(du -sh build/static/css/ 2>/dev/null | cut -f1 || echo "n/a")
+          # Build size summary (Vite outputs to dist/, assets collocated in dist/assets/)
+          if [ -d "dist" ]; then
+            SIZE=$(du -sh dist/ | cut -f1)
+            ASSETS_SIZE=$(du -sh dist/assets/ 2>/dev/null | cut -f1 || echo "n/a")
             echo "| Total size  | $SIZE |"                  >> $GITHUB_STEP_SUMMARY
-            echo "| JS size     | $JS_SIZE |"               >> $GITHUB_STEP_SUMMARY
-            echo "| CSS size    | $CSS_SIZE |"              >> $GITHUB_STEP_SUMMARY
+            echo "| Assets size | $ASSETS_SIZE |"           >> $GITHUB_STEP_SUMMARY
           fi
