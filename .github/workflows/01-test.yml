@@ -112,6 +112,7 @@ jobs:
           if [ -f "coverage/coverage-summary.json" ]; then
             python3 - << 'EOF'
           import json
+          import os
           with open("coverage/coverage-summary.json") as f:
               d = json.load(f)["total"]
           with open(os.environ.get("GITHUB_STEP_SUMMARY", "/dev/stdout"), "a") as s:
