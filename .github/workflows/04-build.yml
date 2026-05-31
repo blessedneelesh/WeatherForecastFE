@@ -1,0 +1,115 @@
+# =============================================================
+# REACT PHASE 04 — Build
+# Trigger  : workflow_call (called by 06-full-pipeline.yml)
+#             OR manually via workflow_dispatch
+# Goal     : npm run build → upload build artifact
+#
+# Mirrors: 10-full-pipeline.yml → jobs.package (Stage 4)
+# Key difference: No Docker, no ACR — just static files
+#
+# REQUIRED VARIABLES:
+#   REACT_APP_API_URL_DEV        → dev API base URL
+#   REACT_APP_API_URL_STAGING    → staging API base URL
+#   REACT_APP_API_URL_PRODUCTION → production API base URL
+# =============================================================
+
+name: "📦 React Phase 04 — Build"
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment: dev | staging | production"
+        type: string
+        required: false
+        default: staging
+    outputs:
+      build-artifact:
+        description: "Name of the uploaded build artifact"
+        value: ${{ jobs.build.outputs.artifact-name }}
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, staging, production]
+        default: staging
+
+env:
+  NODE_VERSION: "20.x"
+
+jobs:
+  build:
+    name: "4 · Build React App (${{ inputs.environment }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      artifact-name: ${{ steps.artifact.outputs.name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Resolve API URL based on environment
+      - name: Resolve environment config
+        id: config
+        run: |
+          if [ "${{ inputs.environment }}" = "production" ]; then
+            echo "api_url=${{ vars.REACT_APP_API_URL_PRODUCTION }}" >> $GITHUB_OUTPUT
+          elif [ "${{ inputs.environment }}" = "staging" ]; then
+            echo "api_url=${{ vars.REACT_APP_API_URL_STAGING }}"    >> $GITHUB_OUTPUT
+          else
+            echo "api_url=${{ vars.REACT_APP_API_URL_DEV }}"        >> $GITHUB_OUTPUT
+          fi
+
+      # Build with environment-specific API URL baked in
+      - name: Build React app (${{ inputs.environment }})
+        run: npm run build
+        env:
+          CI: false    # allows warnings without failing
+          REACT_APP_API_URL: ${{ steps.config.outputs.api_url }}
+          REACT_APP_ENVIRONMENT: ${{ inputs.environment }}
+          REACT_APP_VERSION: ${{ github.sha }}
+
+      # Upload build folder as artifact for deploy job
+      - name: Set artifact name
+        id: artifact
+        run: |
+          NAME="react-build-${{ inputs.environment }}-${{ github.sha }}"
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: build/
+          retention-days: 7
+
+      - name: Post build summary
+        if: always()
+        run: |
+          echo "## 📦 React Phase 04 — Build"               >> $GITHUB_STEP_SUMMARY
+          echo ""                                            >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |"                           >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|"                           >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | \`${{ inputs.environment }}\` |"  >> $GITHUB_STEP_SUMMARY
+          echo "| API URL     | \`${{ steps.config.outputs.api_url }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit      | \`${{ github.sha }}\` |"    >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact    | \`${{ steps.artifact.outputs.name }}\` |" >> $GITHUB_STEP_SUMMARY
+          # Build size summary
+          if [ -d "build" ]; then
+            SIZE=$(du -sh build/ | cut -f1)
+            JS_SIZE=$(du -sh build/static/js/ 2>/dev/null | cut -f1 || echo "n/a")
+            CSS_SIZE=$(du -sh build/static/css/ 2>/dev/null | cut -f1 || echo "n/a")
+            echo "| Total size  | $SIZE |"                  >> $GITHUB_STEP_SUMMARY
+            echo "| JS size     | $JS_SIZE |"               >> $GITHUB_STEP_SUMMARY
+            echo "| CSS size    | $CSS_SIZE |"              >> $GITHUB_STEP_SUMMARY
+          fi
